@@ -28,6 +28,7 @@
 #include "placer1.h"
 #include "placer_heap.h"
 #include "placer_static.h"
+#include "placer_sa_gpu.h"
 #include "router1.h"
 #include "router2.h"
 #include "rust.h"
@@ -710,6 +711,10 @@ bool Arch::place()
         }
         if (!placer_static(getCtx(), cfg))
             return false;
+    } else if (placer == "sagpu") {
+        PlacerSAGPUCfg cfg(getCtx());
+        if (!placer_sagpu(getCtx(), cfg))
+            return false;
     } else {
         log_error("iCE40 architecture does not support placer '%s'\n", placer.c_str());
     }
@@ -1310,7 +1315,7 @@ BoundingBox Arch::getRouteBoundingBox(WireId src, WireId dst) const
 
 const std::string Arch::defaultPlacer = "heap";
 
-const std::vector<std::string> Arch::availablePlacers = {"sa", "heap", "static"};
+const std::vector<std::string> Arch::availablePlacers = {"sa", "heap", "static", "sagpu"};
 
 const std::string Arch::defaultRouter = "router1";
 const std::vector<std::string> Arch::availableRouters = {"router1", "router2"};

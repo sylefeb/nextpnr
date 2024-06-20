@@ -21,7 +21,7 @@
  *
  */
 
-#include "placer1.h"
+#include "placer_sa_gpu.h"
 #include <algorithm>
 #include <boost/lexical_cast.hpp>
 #include <boost/range/adaptor/reversed.hpp>
@@ -51,7 +51,7 @@
 
 NEXTPNR_NAMESPACE_BEGIN
 
-class SAPlacer
+class SAPlacerGPU
 {
   private:
     struct BoundingBox
@@ -60,14 +60,14 @@ class SAPlacer
         int x0 = 0, x1 = 0, y0 = 0, y1 = 0;
         // Number of cells at each extremity
         int nx0 = 0, nx1 = 0, ny0 = 0, ny1 = 0;
-        wirelen_t hpwl(const Placer1Cfg &cfg) const
+        wirelen_t hpwl(const PlacerSAGPUCfg &cfg) const
         {
             return wirelen_t(cfg.hpwl_scale_x * (x1 - x0) + cfg.hpwl_scale_y * (y1 - y0));
         }
     };
 
   public:
-    SAPlacer(Context *ctx, Placer1Cfg cfg)
+    SAPlacerGPU(Context *ctx, PlacerSAGPUCfg cfg)
             : ctx(ctx), fast_bels(ctx, /*check_bel_available=*/false, cfg.minBelsForGridPick), cfg(cfg), tmg(ctx)
     {
         for (auto bel : ctx->getBels()) {
@@ -131,7 +131,7 @@ class SAPlacer
         }
     }
 
-    ~SAPlacer()
+    ~SAPlacerGPU()
     {
         for (auto &net : ctx->nets)
             net.second->udata = old_udata[net.second->udata];
@@ -140,6 +140,8 @@ class SAPlacer
     bool place(bool refine = false)
     {
         log_break();
+
+        // log_error("**************************** HERE!");
 
         ScopeLock<Context> lock(ctx);
 
@@ -220,7 +222,7 @@ class SAPlacer
                      std::chrono::duration<float>(iplace_end - iplace_start).count());
             log_info("Running simulated annealing placer.\n");
         } else {
-            for (auto &cell : ctx->cells) {
+            /*for (auto &cell : ctx->cells) {
                 CellInfo *ci = cell.second.get();
                 if (ci->isPseudo() || ci->belStrength > STRENGTH_STRONG) {
                     continue;
@@ -236,7 +238,10 @@ class SAPlacer
             require_legal = false;
             diameter = 3;
             log_info("Running simulated annealing placer for refinement.\n");
+            */
+           log_error("NOT IMPLEMENTED");
         }
+#if 1
         auto saplace_start = std::chrono::high_resolution_clock::now();
 
         // Invoke timing analysis to obtain criticalities
@@ -393,7 +398,7 @@ class SAPlacer
 
         auto saplace_end = std::chrono::high_resolution_clock::now();
         log_info("SA placement time %.02fs\n", std::chrono::duration<float>(saplace_end - saplace_start).count());
-
+#endif
         // Final post-placement validity check
         ctx->yield();
         for (auto bel : ctx->getBels()) {
@@ -905,7 +910,7 @@ class SAPlacer
         wirelen_t wirelen_delta = 0;
         double timing_delta = 0;
 
-        void init(SAPlacer *p)
+        void init(SAPlacerGPU *p)
         {
             already_bounds_changed_x.resize(p->ctx->nets.size());
             already_bounds_changed_y.resize(p->ctx->nets.size());
@@ -916,7 +921,7 @@ class SAPlacer
             new_net_bounds = p->net_bounds;
         }
 
-        void reset(SAPlacer *p)
+        void reset(SAPlacerGPU *p)
         {
             for (auto bc : bounds_changed_nets_x) {
                 new_net_bounds[bc] = p->net_bounds[bc];
@@ -1223,17 +1228,17 @@ class SAPlacer
     std::vector<decltype(NetInfo::udata)> old_udata;
     bool require_legal = true;
     const int legalise_dia = 4;
-    Placer1Cfg cfg;
+    PlacerSAGPUCfg cfg;
 
     TimingAnalyser tmg;
 };
 
-Placer1Cfg::Placer1Cfg(Context *ctx)
+PlacerSAGPUCfg::PlacerSAGPUCfg(Context *ctx)
 {
-    constraintWeight = ctx->setting<float>("placer1/constraintWeight", 10);
-    netShareWeight = ctx->setting<float>("placer1/netShareWeight", 0);
-    minBelsForGridPick = ctx->setting<int>("placer1/minBelsForGridPick", 64);
-    startTemp = ctx->setting<float>("placer1/startTemp", 1);
+    constraintWeight = ctx->setting<float>("placerSAGPU/constraintWeight", 10);
+    netShareWeight = ctx->setting<float>("placerSAGPU/netShareWeight", 0);
+    minBelsForGridPick = ctx->setting<int>("placerSAGPU/minBelsForGridPick", 64);
+    startTemp = ctx->setting<float>("placerSAGPU/startTemp", 1);
     timingFanoutThresh = std::numeric_limits<int>::max();
     timing_driven = ctx->setting<bool>("timing_driven");
     slack_redist_iter = ctx->setting<int>("slack_redist_iter");
@@ -1241,33 +1246,11 @@ Placer1Cfg::Placer1Cfg(Context *ctx)
     hpwl_scale_y = 1;
 }
 
-bool placer1(Context *ctx, Placer1Cfg cfg)
+bool placer_sagpu(Context *ctx, PlacerSAGPUCfg cfg)
 {
     try {
-        SAPlacer placer(ctx, cfg);
+        SAPlacerGPU placer(ctx, cfg);
         placer.place();
-        log_info("Checksum: 0x%08x\n", ctx->checksum());
-#ifndef NDEBUG
-        ctx->lock();
-        ctx->check();
-        ctx->unlock();
-#endif
-        return true;
-    } catch (log_execution_error_exception) {
-#ifndef NDEBUG
-        ctx->lock();
-        ctx->check();
-        ctx->unlock();
-#endif
-        return false;
-    }
-}
-
-bool placer1_refine(Context *ctx, Placer1Cfg cfg)
-{
-    try {
-        SAPlacer placer(ctx, cfg);
-        placer.place(true);
         log_info("Checksum: 0x%08x\n", ctx->checksum());
 #ifndef NDEBUG
         ctx->lock();

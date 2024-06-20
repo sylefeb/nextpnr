@@ -1,3 +1,5 @@
+# cmake .. -G "MinGW Makefiles" -DARCH=ice40 -DSTATIC_BUILD=OFF -DICESTORM_INSTALL_PREFIX="${MINGW_PREFIX}" -DUSE_IPO=OFF -DCMAKE_INSTALL_PREFIX="${MINGW_PREFIX}" -DSTATIC_BUILD=ON
+
 cmake_minimum_required(VERSION 3.13)
 project(nextpnr CXX C)
 
@@ -10,7 +12,7 @@ cmake_policy(SET CMP0079 NEW)
 # compilation database as not all clang/gcc share the same implicit includes
 # leading to essentially non-working compile_commands.json
 if(CMAKE_EXPORT_COMPILE_COMMANDS)
-  set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES 
+  set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES
       ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
 endif()
 
@@ -30,6 +32,16 @@ option(WERROR "pass -Werror to compiler (used for CI)" OFF)
 option(PROFILER "Link against libprofiler" OFF)
 option(USE_IPO "Compile nextpnr with IPO" ON)
 option(USE_RUST "Enable Rust bindings" OFF)
+
+include(FetchContent)
+
+FetchContent_Declare(
+  libsl
+  GIT_REPOSITORY https://github.com/sylefeb/LibSL.git
+  GIT_TAG        master
+)
+
+FetchContent_MakeAvailable(libsl)
 
 if (USE_RUST)
     add_subdirectory(3rdparty/corrosion)
@@ -288,6 +300,9 @@ if(TBB_FOUND)
     list(APPEND EXTRA_LIB_DEPS TBB::tbb)
 endif()
 
+# SL: MinGW needs -DUSE_IPO=OFF
+# https://github.com/YosysHQ/nextpnr/issues/684
+
 foreach (family ${ARCH})
     message(STATUS "Configuring architecture: ${family}")
     string(TOUPPER ${family} ufamily)
@@ -342,7 +357,7 @@ foreach (family ${ARCH})
     include(${family}/family.cmake)
     foreach (target ${family_targets})
         foreach(lib_dep ${EXTRA_LIB_DEPS})
-            target_link_libraries(${target} PRIVATE ${lib_dep})
+            target_link_libraries(${target} PRIVATE ${lib_dep} LibSL LibSL_gl4core)
         endforeach()
 
         # Include family-specific source files to all family targets and set defines appropriately
