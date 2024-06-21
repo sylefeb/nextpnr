@@ -168,6 +168,10 @@ class ConstraintLegaliseWorker
             return false;
 
         if (cell->cluster == ClusterId()) {
+
+log_info("####     NOT in cluster ******** '%s'\n", cell->name.c_str(ctx) );
+// log_error("ERROR");
+
             if (!ctx->isValidBelForCellType(cell->type, locBel))
                 return false;
             if (!ctx->checkBelAvail(locBel)) {
@@ -184,7 +188,11 @@ class ConstraintLegaliseWorker
             }
             usedLocations.insert(loc);
             solution[cell->name] = loc;
+
         } else {
+
+log_info("####     IN cluster ******** '%s'\n", cell->name.c_str(ctx) );
+
             std::vector<std::pair<CellInfo *, BelId>> placement;
             if (!ctx->getClusterPlacement(cell->cluster, locBel, placement))
                 return false;
@@ -230,6 +238,7 @@ class ConstraintLegaliseWorker
             if (cell->cluster != ClusterId())
                 lockdown_chain(cell);
         } else {
+
             IncreasingDiameterSearch xRootSearch, yRootSearch, zRootSearch;
             Loc currentLoc;
             if (cell->bel != BelId())

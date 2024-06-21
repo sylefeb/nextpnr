@@ -139,266 +139,104 @@ class SAPlacerGPU
 
     bool place(bool refine = false)
     {
-        log_break();
+        /*
+        SL:
 
-        // log_error("**************************** HERE!");
+        For now this is a hacked version of placer1, where only the
+        initialization is kept, trying to shrink down to a minimal placer.
+
+        */
+        log_break();
 
         ScopeLock<Context> lock(ctx);
 
         size_t placed_cells = 0;
         std::vector<CellInfo *> autoplaced;
         std::vector<CellInfo *> chain_basis;
-        if (!refine) {
-            // Initial constraints placer
-            for (auto &cell_entry : ctx->cells) {
-                CellInfo *cell = cell_entry.second.get();
-                if (cell->isPseudo())
-                    continue;
-                auto loc = cell->attrs.find(ctx->id("BEL"));
-                if (loc != cell->attrs.end()) {
-                    std::string loc_name = loc->second.as_string();
-                    BelId bel = ctx->getBelByNameStr(loc_name);
-                    if (bel == BelId()) {
-                        log_error("No Bel named \'%s\' located for "
-                                  "this chip (processing BEL attribute on \'%s\')\n",
-                                  loc_name.c_str(), cell->name.c_str(ctx));
-                    }
 
-                    if (!ctx->isValidBelForCellType(cell->type, bel)) {
-                        IdString bel_type = ctx->getBelType(bel);
-                        log_error("Bel \'%s\' of type \'%s\' does not match cell "
-                                  "\'%s\' of type \'%s\'\n",
-                                  loc_name.c_str(), bel_type.c_str(ctx), cell->name.c_str(ctx), cell->type.c_str(ctx));
-                    }
-                    auto bound_cell = ctx->getBoundBelCell(bel);
-                    if (bound_cell) {
-                        log_error(
-                                "Cell \'%s\' cannot be bound to bel \'%s\' since it is already bound to cell \'%s\'\n",
-                                cell->name.c_str(ctx), loc_name.c_str(), bound_cell->name.c_str(ctx));
-                    }
-
-                    ctx->bindBel(bel, cell, STRENGTH_USER);
-                    if (!ctx->isBelLocationValid(bel, /* explain_invalid */ true)) {
-                        IdString bel_type = ctx->getBelType(bel);
-                        log_error("Bel \'%s\' of type \'%s\' is not valid for cell "
-                                  "\'%s\' of type \'%s\'\n",
-                                  loc_name.c_str(), bel_type.c_str(ctx), cell->name.c_str(ctx), cell->type.c_str(ctx));
-                    }
-                    locked_bels.insert(bel);
-                    placed_cells++;
+        // -------------------------------------> constrained cells
+        // Initial constraints placer
+        for (auto &cell_entry : ctx->cells) {
+            CellInfo *cell = cell_entry.second.get();
+            if (cell->isPseudo())
+                continue;
+            auto loc = cell->attrs.find(ctx->id("BEL"));
+            if (loc != cell->attrs.end()) {
+                std::string loc_name = loc->second.as_string();
+                BelId bel = ctx->getBelByNameStr(loc_name);
+                if (bel == BelId()) {
+                    log_error("No Bel named \'%s\' located for "
+                                "this chip (processing BEL attribute on \'%s\')\n",
+                                loc_name.c_str(), cell->name.c_str(ctx));
                 }
-            }
-            int constr_placed_cells = placed_cells;
-            log_info("Placed %d cells based on constraints.\n", int(placed_cells));
-            ctx->yield();
 
-            // Sort to-place cells for deterministic initial placement
-
-            for (auto &cell : ctx->cells) {
-                CellInfo *ci = cell.second.get();
-                if (!ci->isPseudo() && (ci->bel == BelId())) {
-                    autoplaced.push_back(cell.second.get());
+                if (!ctx->isValidBelForCellType(cell->type, bel)) {
+                    IdString bel_type = ctx->getBelType(bel);
+                    log_error("Bel \'%s\' of type \'%s\' does not match cell "
+                                "\'%s\' of type \'%s\'\n",
+                                loc_name.c_str(), bel_type.c_str(ctx), cell->name.c_str(ctx), cell->type.c_str(ctx));
                 }
-            }
-            std::sort(autoplaced.begin(), autoplaced.end(), [](CellInfo *a, CellInfo *b) { return a->name < b->name; });
-            ctx->shuffle(autoplaced);
-            auto iplace_start = std::chrono::high_resolution_clock::now();
-            // Place cells randomly initially
-            log_info("Creating initial placement for remaining %d cells.\n", int(autoplaced.size()));
+                auto bound_cell = ctx->getBoundBelCell(bel);
+                if (bound_cell) {
+                    log_error(
+                            "Cell \'%s\' cannot be bound to bel \'%s\' since it is already bound to cell \'%s\'\n",
+                            cell->name.c_str(ctx), loc_name.c_str(), bound_cell->name.c_str(ctx));
+                }
 
-            for (auto cell : autoplaced) {
-                place_initial(cell);
+                ctx->bindBel(bel, cell, STRENGTH_USER);
+                if (!ctx->isBelLocationValid(bel, /* explain_invalid */ true)) {
+                    IdString bel_type = ctx->getBelType(bel);
+                    log_error("Bel \'%s\' of type \'%s\' is not valid for cell "
+                                "\'%s\' of type \'%s\'\n",
+                                loc_name.c_str(), bel_type.c_str(ctx), cell->name.c_str(ctx), cell->type.c_str(ctx));
+                }
+
+                log_info("####     Constrained: ******** '%s'\n", cell->name.c_str(ctx) );
+
+                locked_bels.insert(bel);
                 placed_cells++;
-                if ((placed_cells - constr_placed_cells) % 500 == 0)
-                    log_info("  initial placement placed %d/%d cells\n", int(placed_cells - constr_placed_cells),
-                             int(autoplaced.size()));
             }
-            if ((placed_cells - constr_placed_cells) % 500 != 0)
+        }
+        int constr_placed_cells = placed_cells;
+        log_info("Placed %d cells based on constraints.\n", int(placed_cells));
+        ctx->yield();
+
+        // -------------------------------------> other cells
+        // Sort to-place cells for deterministic initial placement
+        for (auto &cell : ctx->cells) {
+            CellInfo *ci = cell.second.get();
+            if (!ci->isPseudo() && (ci->bel == BelId())) {
+                autoplaced.push_back(cell.second.get());
+            }
+        }
+        std::sort(autoplaced.begin(), autoplaced.end(), [](CellInfo *a, CellInfo *b) { return a->name < b->name; });
+        ctx->shuffle(autoplaced);
+        auto iplace_start = std::chrono::high_resolution_clock::now();
+
+        // Place cells randomly initially
+        log_info("Creating initial placement for remaining %d cells.\n", int(autoplaced.size()));
+
+        for (auto cell : autoplaced) {
+            place_initial(cell);
+            placed_cells++;
+            if ((placed_cells - constr_placed_cells) % 500 == 0)
                 log_info("  initial placement placed %d/%d cells\n", int(placed_cells - constr_placed_cells),
-                         int(autoplaced.size()));
-            ctx->yield();
-            auto iplace_end = std::chrono::high_resolution_clock::now();
-            log_info("Initial placement time %.02fs\n",
-                     std::chrono::duration<float>(iplace_end - iplace_start).count());
-            log_info("Running simulated annealing placer.\n");
-        } else {
-            /*for (auto &cell : ctx->cells) {
-                CellInfo *ci = cell.second.get();
-                if (ci->isPseudo() || ci->belStrength > STRENGTH_STRONG) {
-                    continue;
-                } else if (ci->cluster != ClusterId()) {
-                    if (ctx->getClusterRootCell(ci->cluster) == ci)
-                        chain_basis.push_back(ci);
-                    else
-                        continue;
-                } else {
-                    autoplaced.push_back(ci);
-                }
-            }
-            require_legal = false;
-            diameter = 3;
-            log_info("Running simulated annealing placer for refinement.\n");
-            */
-           log_error("NOT IMPLEMENTED");
+                            int(autoplaced.size()));
         }
-#if 1
-        auto saplace_start = std::chrono::high_resolution_clock::now();
+        if ((placed_cells - constr_placed_cells) % 500 != 0)
+            log_info("  initial placement placed %d/%d cells\n", int(placed_cells - constr_placed_cells),
+                        int(autoplaced.size()));
+        ctx->yield();
+        auto iplace_end = std::chrono::high_resolution_clock::now();
+        log_info("Initial placement time %.02fs\n",
+                    std::chrono::duration<float>(iplace_end - iplace_start).count());
+        log_info("Running simulated annealing placer.\n");
 
-        // Invoke timing analysis to obtain criticalities
-        tmg.setup_only = true;
-        tmg.setup();
+        // -------------------------------------> legalization
+        // Legalize constraints
+        legalise_relative_constraints(ctx);
 
-        // Calculate costs after initial placement
-        setup_costs();
-        moveChange.init(this);
-        curr_wirelen_cost = total_wirelen_cost();
-        curr_timing_cost = total_timing_cost();
-        last_wirelen_cost = curr_wirelen_cost;
-        last_timing_cost = curr_timing_cost;
-
-        if (cfg.netShareWeight > 0)
-            setup_nets_by_tile();
-
-        wirelen_t avg_wirelen = curr_wirelen_cost;
-        wirelen_t min_wirelen = curr_wirelen_cost;
-
-        int n_no_progress = 0;
-        temp = refine ? 1e-7 : cfg.startTemp;
-
-        // Main simulated annealing loop
-        for (int iter = 1;; iter++) {
-            n_move = n_accept = 0;
-            improved = false;
-
-            if (iter % 5 == 0 || iter == 1)
-                log_info("  at iteration #%d: temp = %f, timing cost = "
-                         "%.0f, wirelen = %.0f\n",
-                         iter, temp, double(curr_timing_cost), double(curr_wirelen_cost));
-
-            for (int m = 0; m < 15; ++m) {
-                // Loop through all automatically placed cells
-                for (auto cell : autoplaced) {
-                    // Find another random Bel for this cell
-                    BelId try_bel = random_bel_for_cell(cell);
-                    // If valid, try and swap to a new position and see if
-                    // the new position is valid/worthwhile
-                    if (try_bel != BelId() && try_bel != cell->bel)
-                        try_swap_position(cell, try_bel);
-                }
-                // Also try swapping chains, if applicable
-                for (auto cb : chain_basis) {
-                    Loc chain_base_loc = ctx->getBelLocation(cb->bel);
-                    BelId try_base = random_bel_for_cell(cb, chain_base_loc.z);
-                    if (try_base != BelId() && try_base != cb->bel)
-                        try_swap_chain(cb, try_base);
-                }
-            }
-
-            if (ctx->debug) {
-                // Verify correctness of incremental wirelen updates
-                for (size_t i = 0; i < net_bounds.size(); i++) {
-                    auto net = net_by_udata[i];
-                    if (ignore_net(net))
-                        continue;
-                    auto &incr = net_bounds.at(i), gold = get_net_bounds(net);
-                    NPNR_ASSERT(incr.x0 == gold.x0);
-                    NPNR_ASSERT(incr.x1 == gold.x1);
-                    NPNR_ASSERT(incr.y0 == gold.y0);
-                    NPNR_ASSERT(incr.y1 == gold.y1);
-                    NPNR_ASSERT(incr.nx0 == gold.nx0);
-                    NPNR_ASSERT(incr.nx1 == gold.nx1);
-                    NPNR_ASSERT(incr.ny0 == gold.ny0);
-                    NPNR_ASSERT(incr.ny1 == gold.ny1);
-                }
-            }
-
-            if (curr_wirelen_cost < min_wirelen) {
-                min_wirelen = curr_wirelen_cost;
-                improved = true;
-            }
-
-            // Heuristic to improve placement on the 8k
-            if (improved)
-                n_no_progress = 0;
-            else
-                n_no_progress++;
-
-            if (temp <= 1e-7 && n_no_progress >= (refine ? 1 : 5)) {
-                log_info("  at iteration #%d: temp = %f, timing cost = "
-                         "%.0f, wirelen = %.0f \n",
-                         iter, temp, double(curr_timing_cost), double(curr_wirelen_cost));
-                break;
-            }
-
-            double Raccept = double(n_accept) / double(n_move);
-
-            int M = std::max(max_x, max_y) + 1;
-
-            if (ctx->verbose)
-                log("iter #%d: temp = %f, timing cost = "
-                    "%.0f, wirelen = %.0f, dia = %d, Ra = %.02f \n",
-                    iter, temp, double(curr_timing_cost), double(curr_wirelen_cost), diameter, Raccept);
-
-            if (curr_wirelen_cost < 0.95 * avg_wirelen && curr_wirelen_cost > 0) {
-                avg_wirelen = 0.8 * avg_wirelen + 0.2 * curr_wirelen_cost;
-            } else {
-                double diam_next = diameter * (1.0 - 0.44 + Raccept);
-                diameter = std::max<int>(1, std::min<int>(M, int(diam_next + 0.5)));
-                if (Raccept > 0.96) {
-                    temp *= 0.5;
-                } else if (Raccept > 0.8) {
-                    temp *= 0.9;
-                } else if (Raccept > 0.15 && diameter > 1) {
-                    temp *= 0.95;
-                } else {
-                    temp *= 0.8;
-                }
-            }
-            // Once cooled below legalise threshold, run legalisation and start requiring
-            // legal moves only
-            if (diameter < legalise_dia && require_legal) {
-                if (legalise_relative_constraints(ctx)) {
-                    // Only increase temperature if something was moved
-                    autoplaced.clear();
-                    chain_basis.clear();
-                    for (auto &cell : ctx->cells) {
-                        if (cell.second->isPseudo())
-                            continue;
-                        if (cell.second->belStrength <= STRENGTH_STRONG && cell.second->cluster != ClusterId() &&
-                            ctx->getClusterRootCell(cell.second->cluster) == cell.second.get())
-                            chain_basis.push_back(cell.second.get());
-                        else if (cell.second->belStrength < STRENGTH_STRONG)
-                            autoplaced.push_back(cell.second.get());
-                    }
-                    // temp = post_legalise_temp;
-                    // diameter = std::min<int>(M, diameter * post_legalise_dia_scale);
-                    ctx->shuffle(autoplaced);
-                }
-                require_legal = false;
-            }
-
-            // Invoke timing analysis to obtain criticalities
-            if (cfg.timing_driven)
-                tmg.run();
-            // Need to rebuild costs after criticalities change
-            setup_costs();
-            // Reset incremental bounds
-            moveChange.reset(this);
-            moveChange.new_net_bounds = net_bounds;
-
-            // Recalculate total metric entirely to avoid rounding errors
-            // accumulating over time
-            curr_wirelen_cost = total_wirelen_cost();
-            curr_timing_cost = total_timing_cost();
-            last_wirelen_cost = curr_wirelen_cost;
-            last_timing_cost = curr_timing_cost;
-            // Let the UI show visualization updates.
-            ctx->yield();
-        }
-
-        auto saplace_end = std::chrono::high_resolution_clock::now();
-        log_info("SA placement time %.02fs\n", std::chrono::duration<float>(saplace_end - saplace_start).count());
-#endif
+        // -------------------------------------> checks and finalization
         // Final post-placement validity check
         ctx->yield();
         for (auto bel : ctx->getBels()) {
@@ -418,6 +256,7 @@ class SAPlacerGPU
                 }
             }
         }
+
         timing_analysis(ctx);
 
         return true;
